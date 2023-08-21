@@ -1,0 +1,433 @@
+######## INSTALAÇÃO DO COOLPROP ########
+
+pip install CoolProp
+
+
+######## BIBLIOTECAS ########
+
+from typing import Any, Union
+
+import numpy as np
+import CoolProp.CoolProp as CP  # Thermodynamics tools
+import matplotlib.pyplot as plt  # Graphics tools
+from CoolProp.CoolProp import PropsSI
+from google.colab import files
+import math
+from math import *
+
+
+
+####### FUNÇÃO PARA ELIMINAÇÃO GAUSSIANA #######
+
+
+def Elim_Gauss(A,b):
+    '''
+    "A" é uma matriz nxn, e "b" é uma lista de n termos.
+    '''
+    n=len(A)
+    for k in range (0,n):
+        indice=0  #índice do termo de maior módulo da coluna k
+        termo=A[k][k]  #termo de maior módulo da coluna k
+        "Vou procurar o termo de maior módulo"
+        for i in range (k+1,n):
+            if (abs(termo)<abs(A[i][k])):
+                termo=A[i][k]
+        "Achei o termo de maior módulo! Mas qual o índice dele? Vou descobrir agora."
+        for i in range (0,n):
+            if (termo==A[i][k]):
+                indice=i
+        if (termo==0):
+            print  ("Matriz Singular")
+            x=0
+            return
+        "Após encontrar o maior termo na coluna 'k, vou trocar a k-ésima linha da matriz [A|b] e a linha 'indice'."
+        if (k!=indice):
+            v=b[k]
+            b[k]=b[indice]
+            b[indice]=v
+            for j in range (0,n):
+                v=A[k][j]
+                A[k][j]=A[indice][j]
+                A[indice][j]=v
+        "Terminei de realizar as trocas das linhas da matriz. Agora vou transformar os termos"
+        "que estão abaixo da diagonal principal em nulos."
+        for i in range (k+1,n):
+            m=A[i][k]/A[k][k]
+            b[i]=b[i]-m*b[k];
+            for j in range (k+1,n):
+                A[i][j]=A[i][j]-m*A[k][j]
+        "Agora as matrizes estão prontas!"
+    if (A[n-1][n-1]==0):
+        x=0
+        print('Matriz singular')
+        return
+
+    "Vou criar a matriz x com n elementos nulos"
+    x=[]
+    for i in range (0,n):
+        x.append(0)
+
+    "Agora vou resolver o sistema"
+    x[n-1]=b[n-1]/A[n-1][n-1]
+    for k in range (n-1,-1,-1):
+        soma=b[k];
+        for j in range(k+1,n):
+            soma=soma-A[k][j]*x[j];
+
+        x[k]=soma/A[k][k]
+
+    return (x)
+
+
+
+
+####### GEOMETRIA DO ROTOR #######
+
+
+'''dimensões do rotor (você pode alterar esses valores)'''
+
+rsh1 = 0.02
+rh1 = 0.01
+rm1 = (rsh1 + rh1) / 2
+r2 = 0.04
+b1 = rsh1 - rh1
+b2 = 0.002
+hr = 0.03
+beta1 = 70 * np.pi / 180
+beta2 = 20 * np.pi / 180
+epsilon = 0.02 * b2
+tr = 0.00076  
+Zr = 10
+rug = 0.0002  # rugosidade
+
+
+
+'''Quantidade de elementos finitos'''
+
+q = 4000  #sugiro valores na ordem de 10^3
+k = 2.0 #fator de forma da superelipse (1.6, 2.0 ou 3.0)
+j = 1  #fator de forma da curva de beta (1 ou 2)
+
+
+'''Vetor phi'''
+dphi = np.pi/(2*q)
+phi = [0]
+for i in range(q):
+    phi.append(phi[i] + dphi)
+
+
+'''Dimensões das (q+1) seções transversais'''
+
+E_sh = []
+E_m = []
+E_h = []
+
+b = []
+rsh = []
+rm = []
+rh = []
+drmdL = []
+
+R1 = r2 - rm1
+R2 = hr - b2/2
+rc = []
+
+
+for i in range(q+1):
+    E_sh.append(    ((cos(phi[i])/(r2-rsh1))**k + (sin(phi[i])/(hr-b2))**k)**(-1/k)      )
+    E_m.append(     ((cos(phi[i])/(r2-rm1))**k + (sin(phi[i])/(hr-b2/2))**k)**(-1/k)      )
+    E_h.append(     ((cos(phi[i])/(r2-rh1))**k + (sin(phi[i])/(hr))**k)**(-1/k)      )
+
+    b.append(E_h[i] - E_sh[i])
+    rsh.append(r2 - E_sh[i] * cos(phi[i]))
+    rm.append(r2 - E_m[i] * cos(phi[i]))
+    rh.append(r2 - E_h[i] * cos(phi[i]))
+
+    if phi[i] > 0:
+      rc.append((R1**2 * sin(phi[i])**2 * cos(phi[i])**(4/k-2) + R2**2 * cos(phi[i])**2 * sin(phi[i])**(4/k-2))**(3/2)   /   (R1*R2*(sin(phi[i])*cos(phi[i]))**(2/k-1) * (k-1))  )
+
+if k <= 2:
+    rc.insert(0, rc[0])
+    rc[q] = rc[q-1]
+else:
+    rc.insert(0, 1e10)
+    rc[q] = 1e10
+
+'''Comprimento meridional'''
+
+dL = []
+dLe = []
+L = [0]
+L_ef = []  #vetor L com 1 elemento a menos (para plotar vetores referentes aos elementos finitos).
+Lm=0  #comprimento da linha média
+
+
+for i in range(q):
+    dL.append(sqrt((E_m[i] * sin(phi[i]) - E_m[i+1] * sin(phi[i+1]))**2 + (rm[i] - rm[i+1])**2))
+    dLe.append(sqrt((E_sh[i] * sin(phi[i]) - E_sh[i+1] * sin(phi[i+1]))**2 + (rsh[i] - rsh[i+1])**2))
+    L.append(L[i] + dL[i])
+    L_ef.append(L[i] + dL[i])
+    Lm = Lm + dL[i]
+
+#Lm = np.pi/4 * (3*(R1+R2) - sqrt((3*R1+R2) * (R1+3*R2))) #comprimento do arco para n=2
+
+L_adm = [0]
+L_adm_ef = []
+for i in range(q):
+    L_adm.append(L[i]/Lm)
+    L_adm_ef.append(L[i]/Lm)
+
+'''Derivada drm/dL'''
+
+drmdL = []
+
+for i in range(1, q+1):
+    drmdL.append((rm[i] - rm[i-1]) / dL[i-1])
+
+'''Ângulo beta'''
+
+beta = [beta1]
+dbeta = []
+dbetadL = []
+
+for i in range(1,q+1):
+    beta.append(atan(tan(beta1) / ((L[i]/Lm)**j * (tan(beta1)/tan(beta2) - 1) + 1)))
+    dbeta.append(beta[i] - beta[i-1])
+    dbetadL.append((beta[i] - beta[i-1]) / dL[i-1])
+
+
+'''Áreas e Perimetros'''
+
+Am = []
+Pm = []
+Dm = []
+AW = []
+PW = []
+DW = []
+
+for i in range(q+1):
+    Am.append(np.pi * b[i] * (rsh[i] + rh[i]) / Zr)
+    Pm.append(2*b[i] + 2*np.pi * (rsh[i] + rh[i]) / Zr)
+    Dm.append(4*Am[i]/Pm[i])
+    AW.append(Am[i] * cos(beta[i]))
+    PW.append(2*b[i] + 2*np.pi*cos(beta[i]) * (rsh[i] + rh[i]) / Zr)
+    DW.append(4*AW[i]/PW[i])
+
+
+
+
+####### ESTADO NA SUCÇÃO DO ROTOR #######
+
+'''Propriedades termodinâmicas na sucção (recebem o índice 1)'''
+
+fluid = 'CO2'
+P1 = 8.79e6   #Pa
+T1 = 39 + 273.15   #K
+
+h1 = CP.PropsSI('H', 'P', P1, 'T', T1, fluid)
+s1 = CP.PropsSI('S', 'P', P1, 'T', T1, fluid)
+rho1 = CP.PropsSI('D', 'P', P1, 'T', T1, fluid)
+ms1 = P1 / T1 * CP.PropsSI('d(T)/d(P)|S', 'T', T1, 'P', P1, fluid)
+ns1 = rho1 / P1 * CP.PropsSI('d(P)/d(D)|S', 'P', P1, 'T', T1, fluid)
+mu1 = CP.PropsSI('VISCOSITY', 'P', P1, 'T', T1, fluid)
+cp1 = CP.PropsSI('C', 'P', P1, 'T', T1, fluid)
+c1 = sqrt(CP.PropsSI('d(P)/d(D)|S', 'P', P1, 'T', T1, fluid))
+Z1 = CP.PropsSI('Z', 'P', P1, 'T', T1, fluid)
+
+
+'''Propriedades fluidodinâmicas na sucção (recebem o índice 1)'''
+
+VA1 = 50  # m/s
+alpha1 = 0   # radianos
+
+Vm1 = VA1 * math.cos(alpha1)
+W1 = Vm1 / math.cos(beta1)
+Vt1 = VA1 * math.sin(alpha1)
+Wt1 = W1 * math.sin(beta1)
+U1 = Vt1 + Wt1
+M1 = VA1 / c1
+
+Re1 = rho1 * W1 * DW[0] / mu1
+
+AA1 = Am[0] * cos(alpha1)
+
+#entalpia de estagnação
+
+h01 = h1 + VA1**2/2
+
+P01 = CP.PropsSI('P', 'H', h01, 'S', s1, fluid)
+T01 = CP.PropsSI('T', 'H', h01, 'S', s1, fluid)
+
+'''fatores de atrito na sucção (recebem o índice 1)'''
+
+f1 = 0.25 * (-2 * log10( rug/(3.7*DW[0]) - 5.16/Re1 * log10( rug/(3.7*DW[0]) + 5.09/Re1**0.87 )))**(-2) #tubulação reta
+fc1 = f1 * (1 + 0.075 * Re1**0.25 * math.sqrt(DW[0]/(2*rc[0]))) #tubulação curva
+
+'''Fluxo de massa'''
+m_tot = rho1 * Vm1 * Am[0] * Zr
+
+'''Variações de entalpia, entropia e perda de carga'''
+
+deltah = 0
+deltahp = 0
+deltah_pas = 0
+deltah_tip = 0
+deltas = 0
+deltah0 = 0
+
+
+'''Vetores de propriedades'''
+
+P = [P1]
+P0 = [P01]
+T = [T1]
+T0 = [T01]
+h = [h1]
+h0 = [h01]
+s = [s1]
+rho = [rho1]
+ms = [ms1]
+ns = [ns1]
+mu = [mu1]
+cp = [cp1]
+c = [c1]
+Z = [Z1]
+
+VA = [VA1]
+alpha = [alpha1]
+Vm = [Vm1]
+W = [W1]
+Vt = [Vt1]
+Wt = [Wt1]
+U = [U1]
+M = [M1]
+AA = [AA1]
+
+Re = [Re1]
+f = [f1]
+fc = [fc1]
+
+eta = []
+
+
+
+
+
+####### PROCESSO DE COMPRESSÃO (SOLUÇÃO DO SISTEMA DE EDP's) #######
+
+for i in range(q):
+
+    #Perdas de carga
+
+    dh_pas = fc[i] * W[i]*W[i] * VA[i] / Am[i] / Vm[i] * ( b[i]/cos(beta[i]) + np.pi * (rsh[i] + rh[i]) / Zr ) * dL[i]  #Perda por passagem
+    dh_tip = VA[i] * U[i] * epsilon * dLe[i] / Am[i]      #Perda pela aresta da pá
+
+    deltah_pas = deltah_pas + dh_pas
+    deltah_tip = deltah_tip + dh_tip
+    deltahp = deltahp + dh_pas + dh_tip
+
+    #Cálculo de ds e dU:
+
+    ds = (dh_pas + dh_tip) / T[i]
+    dU = U[i] * (rm[i+1] - rm[i]) / rm[i]
+
+    '''SOLUÇÃO DO SISTEMA DE EQUAÇÕES'''
+
+    #matrizes de coeficientes
+
+    AAA = [[1,                 0,          VA[i], -U[i],                          0,                                  0],
+          [0,          1/rho[i],              0,     0,                    1/Vm[i],                                  0],
+          [1, -c[i]*c[i]/rho[i],              0,     0,                          0,                                  0],
+          [0,                 0,              1,     0,           -1/cos(alpha[i]), -Vm[i]*tan(alpha[i])/cos(alpha[i])],
+          [0,                 0, -sin(alpha[i]),     1,                          0,               -VA[i]*cos(alpha[i])],
+          [0,                 0,               0,    0, tan(alpha[i])+tan(beta[i]),             Vm[i]/cos(alpha[i])**2]]
+
+    bbb = [Vt[i]*dU, -(Am[i+1]-Am[i])/Am[i], (1+ms[i]*ns[i])*T[i]*ds, 0, 0, dU-Vm[i]*(beta[i+1]-beta[i])/cos(beta[i])**2]
+
+    #solução:
+
+    x = Elim_Gauss(AAA, bbb)
+
+    dh = x[0]
+    drho = x[1]
+    dVA = x[2]
+    dVt = x[3]
+    dVm = x[4]
+    dalpha = x[5]
+
+    #Eficiência politrópica
+
+    eta_p = (dh - dh_pas - dh_tip) / dh
+    eta.append(eta_p)
+
+    '''ATUALIZAÇÃO DE VALORES'''
+
+    h.append(h[i] + dh)
+    s.append(s[i] + ds)
+    P.append(CP.PropsSI('P', 'H', h[i+1], 'S', s[i+1], fluid))
+    T.append(CP.PropsSI('T', 'H', h[i+1], 'S', s[i+1], fluid))
+    rho.append(CP.PropsSI('D', 'H', h[i+1], 'S', s[i+1], fluid))
+    ms.append(P[i+1] / T[i+1] * CP.PropsSI('d(T)/d(P)|S', 'H', h[i+1], 'S', s[i+1], fluid))
+    ns.append(rho[i+1] / P[i+1] * CP.PropsSI('d(P)/d(D)|S', 'H', h[i+1], 'S', s[i+1], fluid))
+    mu.append(CP.PropsSI('VISCOSITY', 'H', h[i+1], 'S', s[i+1], fluid))
+    cp.append(CP.PropsSI('C', 'H', h[i+1], 'S', s[i+1], fluid))
+    c.append(sqrt(CP.PropsSI('d(P)/d(D)|S', 'H', h[i+1], 'S', s[i+1], fluid)))
+    Z.append(CP.PropsSI('Z', 'H', h[i+1], 'S', s[i+1], fluid))
+
+    Vm.append(Vm[i] + dVm)
+    alpha.append(alpha[i] + dalpha)
+    VA.append(Vm[i+1] / cos(alpha[i+1]))
+    Vt.append(VA[i+1] *sin(alpha[i+1]))
+    W.append(Vm[i+1] / cos(beta[i+1]))
+    Wt.append(W[i+1] * sin(beta[i+1]))
+    U.append(Vt[i+1] + Wt[i+1])
+    M.append(VA[i+1] / c[i+1])
+    AA.append(Am[i+1] * cos(alpha[i+1]))
+
+    Re.append(rho[i+1] * W[i+1] * DW[i+1] / mu[i+1])
+
+    f.append(0.25 * (-2 * log10( rug/(3.7*DW[i+1]) - 5.16/Re[i+1] * log10( rug/(3.7*DW[i+1]) + 5.09/Re[i+1]**0.87 )))**(-2))
+    fc.append(f[i+1] * (1 + 0.075 * Re[i+1]**0.25 * math.sqrt(DW[i+1]/(2*rc[i+1]))))
+
+    #entalpia e entropia
+
+    deltah = deltah + dh
+    dh0 = dh + VA[i] * dVA
+    h0.append(h0[i] + dh0)
+    P0.append(CP.PropsSI('P', 'H', h0[i+1], 'S', s[i+1], fluid))
+    T0.append(CP.PropsSI('T', 'H', h0[i+1], 'S', s[i+1], fluid))
+    deltah0 = deltah0 + dh0
+    deltas = deltas + ds
+
+
+
+
+
+####### Convertendo para MPa, kJ/kg, kJ/kg.K, graus Celsius, graus e mm² (OPCIONAL) ########
+
+v = []  # vetor de volume específico
+
+for i in range(q+1):
+    h0[i] = h0[i] / 1e3
+    h[i] = h[i] / 1e3
+    s[i] = s[i] / 1e3
+    T[i] = T[i] - 273.15
+    T0[i] = T0[i] - 273.15
+    P[i] = P[i] / 1e6
+    P0[i] = P0[i] / 1e6
+    cp[i] = cp[i] / 1e3
+    alpha[i] = alpha[i] * 180 / np.pi
+    Am[i] = Am[i] * 1e6
+    AW[i] = AW[i] * 1e6
+    AA[i] = AA[i] * 1e6
+    Pm[i] = Pm[i] * 1e3
+    PW[i] = PW[i] * 1e3
+    Dm[i] = Dm[i] * 1e3
+    DW[i] = DW[i] * 1e3
+    b[i] = b[i] * 1e3
+    L[i] = L[i] * 1e3
+    rm[i] = rm[i] * 1e3
+    rsh[i] = rsh[i] * 1e3
+    rh[i] = rh[i] * 1e3
+    beta[i] = beta[i] * 180 / np.pi
+    v.append(1/rho[i])
